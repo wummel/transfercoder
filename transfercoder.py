@@ -39,10 +39,9 @@ def test_executable(exe, options=("--help",)):
     device."""
     cmd = (exe, ) + options
     try:
-        retval = call_silent(cmd)
+        return call_silent(cmd) == 0
     except:
         return False
-    return retval == 0
 
 def filter_hidden(paths):
     return filter(lambda x: x[0] != ".", paths)
@@ -68,25 +67,30 @@ class AudioFile(UserDict.DictMixin):
 
     Or grab the actual underlying quodlibet format object from the
     .data field and get your hands dirty."""
+
     def __init__(self, filename, blacklist=()):
         self.data = MusicFile(filename)
         # Also exclude mutagen's internal tags
         self.blacklist = [ re.compile("^~") ] + blacklist
+
     def __getitem__(self, item):
         if self.blacklisted(item):
             warn("%s is a blacklisted key." % item)
         else:
             return self.data.__getitem__(item)
+
     def __setitem__(self, item, value):
         if self.blacklisted(item):
             warn("%s is a blacklisted key." % item)
         else:
             return self.data.__setitem__(item, value)
+
     def __delitem__(self, item):
         if self.blacklisted(item):
             warn("%s is a blacklisted key." % item)
         else:
             return self.data.__delitem__(item)
+
     def blacklisted(self, item):
         """Return True if tag is blacklisted.
 
@@ -97,8 +101,10 @@ class AudioFile(UserDict.DictMixin):
                 return True
         else:
             return False
+
     def keys(self):
         return [ key for key in self.data.keys() if not self.blacklisted(key) ]
+
     def write(self):
         return self.data.write()
 
@@ -389,17 +395,16 @@ def directory(x):
         return path
 
 def potential_directory(x):
-    if os.path.exists(x):
-        return directory(x)
-    else:
-        return x
+    return directory(x) if os.path.exists(x) else x
+
+default_transcode_formats = set(("flac", "wv", "wav", "ape", "fla"))
 
 def parse_options():
     parser = argparse.ArgumentParser(description='Mirror a directory with transcoding.')
     parser.add_argument('-j', '--jobs', action='store', type=nonneg_int, default=default_job_count(), help="Number of transcoding jobs to run in parallel. Transfers will always run sequentially. The default is the number of cores available on the system. A value of 1 will run transcoding in parallel with copying. Use -j0 to force full sequential operation.")
     parser.add_argument('-m', '--dry-run', action='store_true', default=False, help="Don't actually modify anything.")
     parser.add_argument('-f', '--force', action='store_true', help='Update destination files even if they are newer.')
-    parser.add_argument('-i', '--transcode_formats', action='store', type=comma_delimited_set, help="A comma-separated list of input file extensions that must be transcoded.", default='flac,wv,wav,ape,fla')
+    parser.add_argument('-i', '--transcode_formats', action='store', type=comma_delimited_set, help="A comma-separated list of input file extensions that must be transcoded.", default=','.join(default_transcode_formats))
     parser.add_argument('-o', '--target-format', action='store', help="All input transcode formats will be transcoded to this output format.")
     parser.add_argument('-p', '--pacpl-path', action='store', help="The path to the Perl Audio Converter. Only required if PAC is not already in your $PATH or is installed with a non-standard name.")
     parser.add_argument('-E', '--extra-encoder-options', action='store', help="Extra options to pass to the encoder. This is passed to pacpl using the '--eopts' option. If you think you need to use this, you should probably just edit pacpl's config file instead.")
@@ -414,7 +419,7 @@ def parse_options():
     return parser.parse_args()
 
 def main(source_directory, destination_directory,
-         transcode_formats=set(("flac", "wv", "wav", "ape", "fla")),
+         transcode_formats=default_transcode_formats,
          target_format="ogg",
          pacpl_path="pacpl", extra_encoder_options="",
          rsync_path="rsync",
