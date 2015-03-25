@@ -399,7 +399,7 @@ default_transcode_formats = set(("flac", "wv", "wav", "ape", "fla"))
 def parse_options():
     parser = argparse.ArgumentParser(description='Mirror a directory with transcoding.')
     parser.add_argument('-j', '--jobs', action='store', type=nonneg_int, default=default_job_count(), help="Number of transcoding jobs to run in parallel. Transfers will always run sequentially. The default is the number of cores available on the system. A value of 1 will run transcoding in parallel with copying. Use -j0 to force full sequential operation.")
-    parser.add_argument('-m', '--dry-run', action='store_true', default=False, help="Don't actually modify anything.")
+    parser.add_argument('-n', '--dry-run', action='store_true', default=False, help="Don't actually modify anything.")
     parser.add_argument('-f', '--force', action='store_true', help='Update destination files even if they are newer.')
     parser.add_argument('-i', '--transcode_formats', action='store', type=comma_delimited_set, help="A comma-separated list of input file extensions that must be transcoded.", default=','.join(default_transcode_formats))
     parser.add_argument('-o', '--target-format', action='store', help="All input transcode formats will be transcoded to this output format.")
