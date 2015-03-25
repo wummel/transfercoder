@@ -189,7 +189,7 @@ class Transfercode(object):
         success = False
         if has_rsync:
             try:
-                retval = call_silent([ "rsync", "-q", "-p", self.src, self.dest ]) == 0
+                retval = call_silent([ "rsync", "-q", "-p", self.src, self.dest ])
                 success = (retval == 0)
             except:
                 success = False
