@@ -17,6 +17,10 @@ import tempfile
 import multiprocessing
 import logging
 from multiprocessing.pool import ThreadPool
+from distutils.spawn import find_executable
+
+has_rsync = find_executable("rsync")
+has_pacpl = find_executable("pacpl")
 
 def default_job_count():
     try:
@@ -157,14 +161,14 @@ class Transfercode(object):
     def needs_transcode(self):
         return self.src_ext != self.dest_ext
 
-    def transcode(self, pacpl="pacpl", dry_run=False):
+    def transcode(self, dry_run=False):
         logging.info("Transcoding: %s -> %s", self.src, self.dest)
         if dry_run:
             return
         # pacpl expects a relative path with no extension, apparently
         rel_dest = os.path.relpath(self.dest, self.src_dir)
         rel_dest_base = os.path.splitext(rel_dest)[0]
-        command = [pacpl] + (["--eopts", self.eopts] if self.eopts else []) + \
+        command = ["pacpl"] + (["--eopts", self.eopts] if self.eopts else []) + \
           ["--overwrite", "--keep", "--to", self.dest_ext, "--outfile", rel_dest_base, self.src]
         if call_silent(command) != 0:
             raise Exception("Perl Audio Converter failed")
@@ -177,25 +181,20 @@ class Transfercode(object):
             # It's ok if setting the mode fails
             pass
 
-    def copy(self, rsync=None, dry_run=False):
-        """Copy src to dest.
-
-        Optional arg rsync allows rsync to be used, which may be more
-        efficient."""
+    def copy(self, dry_run=False):
+        """Copy src to dest, trying rsync first then normal file copy."""
         logging.info("Copying: %s -> %s", self.src, self.dest)
         if dry_run:
             return
         success = False
-        if rsync is True:
-            rsync = "rsync"
-        if rsync:
+        if has_rsync:
             try:
-                retval = call_silent([ rsync, "-q", "-p", self.src, self.dest ]) == 0
+                retval = call_silent([ "rsync", "-q", "-p", self.src, self.dest ]) == 0
                 success = (retval == 0)
             except:
                 success = False
         if not success:
-            # Try regular copy instead if rsync failed
+            # Try regular copy instead if rsync is not available or failed
             shutil.copyfile(self.src, self.dest)
             shutil.copymode(self.src, self.dest)
 
@@ -209,7 +208,7 @@ class Transfercode(object):
         elif not os.path.isdir(self.dest_dir):
             raise IOError("Missing output directory: %s" % self.dest_dir)
 
-    def transfer(self, pacpl="pacpl", rsync=None, force=False, dry_run=False, transcode_tempdir=None):
+    def transfer(self, force=False, dry_run=False, transcode_tempdir=None):
         """Copies or transcodes src to dest.
 
     Destination directory must already exist.
@@ -226,12 +225,12 @@ class Transfercode(object):
                 self.check()
             if self.needs_transcode():
                 if transcode_tempdir:
-                    temp = self.transcode_to_tempdir(pacpl=pacpl, rsync=rsync, tempdir=transcode_tempdir, force=True, dry_run=dry_run)
-                    temp.transfer(pacpl=pacpl, rsync=rsync, force=force, dry_run=dry_run, transcode_tempdir=None)
+                    temp = self.transcode_to_tempdir(tempdir=transcode_tempdir, force=True, dry_run=dry_run)
+                    temp.transfer(force=force, dry_run=dry_run, transcode_tempdir=None)
                 else:
-                    self.transcode(pacpl=pacpl, dry_run=dry_run)
+                    self.transcode(dry_run=dry_run)
             else:
-                self.copy(rsync=rsync, dry_run=dry_run)
+                self.copy(dry_run=dry_run)
         else:
             logging.debug("Skipping: %s -> %s", self.src, self.dest)
 
@@ -362,13 +361,11 @@ def create_dirs(dirs):
 
 class TempdirTranscoder(object):
     """A serializable wrapper for Transfercode.transcode_to_tempdir"""
-    def __init__(self, tempdir, pacpl, rsync, force):
+    def __init__(self, tempdir, force):
         self.tempdir = tempdir
-        self.pacpl = pacpl
-        self.rsync = rsync
         self.force = force
     def __call__(self, tfc):
-        return tfc.transcode_to_tempdir(tempdir=self.tempdir, pacpl=self.pacpl, rsync=self.rsync, force=self.force)
+        return tfc.transcode_to_tempdir(tempdir=self.tempdir, force=self.force)
 
 def comma_delimited_set(x):
     # Handles stripping spaces and eliminating zero-length items
@@ -406,9 +403,7 @@ def parse_options():
     parser.add_argument('-f', '--force', action='store_true', help='Update destination files even if they are newer.')
     parser.add_argument('-i', '--transcode_formats', action='store', type=comma_delimited_set, help="A comma-separated list of input file extensions that must be transcoded.", default=','.join(default_transcode_formats))
     parser.add_argument('-o', '--target-format', action='store', help="All input transcode formats will be transcoded to this output format.")
-    parser.add_argument('-p', '--pacpl-path', action='store', help="The path to the Perl Audio Converter. Only required if PAC is not already in your $PATH or is installed with a non-standard name.")
     parser.add_argument('-E', '--extra-encoder-options', action='store', help="Extra options to pass to the encoder. This is passed to pacpl using the '--eopts' option. If you think you need to use this, you should probably just edit pacpl's config file instead.")
-    parser.add_argument('-r', '--rsync_path', action='store', help="The path to the rsync binary. Rsync will be used if available, but it is not required.")
     parser.add_argument('-z', '--include-hidden', action='store', help="Don't skip directories and files starting with a dot.")
     parser.add_argument('-D', '--delete', action='store_true', help="Delete files in the destination that do not have a corresponding file in the source directory.")
     parser.add_argument('-t', '--temp-dir', action='store', help="Temporary directory to use for transcoded files.")
@@ -421,8 +416,7 @@ def parse_options():
 def main(source_directory, destination_directory,
          transcode_formats=default_transcode_formats,
          target_format="ogg",
-         pacpl_path="pacpl", extra_encoder_options="",
-         rsync_path="rsync",
+         extra_encoder_options="",
          dry_run=False, include_hidden=False, delete=False, force=False,
          quiet=False, verbose=False,
          temp_dir=tempfile.gettempdir(), jobs=default_job_count()):
@@ -473,9 +467,8 @@ def main(source_directory, destination_directory,
         for tfc in transfercodes:
             if need_at_least_one_transcode and not dry_run:
                 work_dir = tempfile.mkdtemp(dir=temp_dir, prefix="transfercode_")
-                tfc = tfc.transcode_to_tempdir(tempdir=work_dir, pacpl=pacpl_path,
-                                               rsync=rsync_path, force=force, dry_run=dry_run)
-            tfc.transfer(pacpl=pacpl_path, rsync=rsync_path, force=force, dry_run=dry_run)
+                tfc = tfc.transcode_to_tempdir(tempdir=work_dir, force=force, dry_run=dry_run)
+            tfc.transfer(force=force, dry_run=dry_run)
     else:
         assert not dry_run, "Parallel dry run makes no sense"
         logging.debug("Running %s transcoding %s and 1 transfer job in parallel.", jobs, ("jobs" if jobs > 1 else "job"))
@@ -486,8 +479,7 @@ def main(source_directory, destination_directory,
             # Transcoding step (parallel)
             if need_at_least_one_transcode:
                 work_dir = tempfile.mkdtemp(dir=temp_dir, prefix="transfercode_")
-                f = TempdirTranscoder(tempdir=work_dir, pacpl=pacpl_path, rsync=rsync_path,
-                                      force=force)
+                f = TempdirTranscoder(tempdir=work_dir, force=force)
                 transcode_pool = ThreadPool(jobs)
                 # Sort jobs that don't need transcoding first
                 transfercodes = sorted(transfercodes, key = Transfercode.needs_transcode)
@@ -498,7 +490,7 @@ def main(source_directory, destination_directory,
             # Transfer step (not parallel, since it is disk-bound)
             for tfc in transcoded:
                 last_file = tfc.dest
-                tfc.transfer(pacpl=pacpl_path, rsync=rsync_path, force=force)
+                tfc.transfer(force=force)
             last_file = None
         except KeyboardInterrupt:
             logging.error("Canceled.")
@@ -533,9 +525,7 @@ if __name__ == "__main__":
     res = main(options.source_directory, options.destination_directory,
          transcode_formats=options.transcode_formats,
          target_format=options.target_format,
-         pacpl_path=options.pacpl_path,
          extra_encoder_options=options.extra_encoder_options,
-         rsync_path=options.rsync_path,
          dry_run=options.dry_run,
          include_hidden=options.include_hidden,
          delete=options.delete, force=options.force,
