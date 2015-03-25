@@ -186,12 +186,18 @@ class Transfercode(object):
         copy_mode(self.src, self.dest)
 
     def copy(self, dry_run=False):
-        """Copy src to dest, trying rsync first then normal file copy."""
+        """Copy src to dest, trying hard linking and rsync first,
+        then normal file copy."""
         logging.info("Copying: %s -> %s", self.src, self.dest)
         if dry_run:
             return
         success = False
-        if rsync_exe:
+        try:
+            os.link(self.src, self.dest)
+            success = True
+        except OSError:
+            pass
+        if not success and rsync_exe:
             try:
                 retval = call_silent([rsync_exe, "-q", "-p", self.src, self.dest])
                 success = (retval == 0)
@@ -429,12 +435,12 @@ def main(source_directory, destination_directory,
         transcode_pool = ThreadPool(jobs)
         try:
             transcode_pool.imap(start_transfer, transfercodes)
+            transcode_pool.close()
+            transcode_pool.join()
         except KeyboardInterrupt:
             logging.warn("Stopping transcode processes....")
-            transcode_pool.close()
+            transcode_pool.terminate()
             logging.warn("... stopped.")
-        finally:
-            transcode_pool.join()
     if delete:
         for f in df.walk_extra_dest_files():
             logging.info("Deleting: %s", f)
