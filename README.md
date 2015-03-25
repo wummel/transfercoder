@@ -32,7 +32,7 @@ See the help for more options. Or ask me.
 
 # Prerequisites
 
-* Python with plac module
+* Python
 * Quod Libet - For copying audio tags
 * Perl Audio Converter (yes, *Perl*) - For transcoding
 * Audio encoders and/or decoders for the formats that you are

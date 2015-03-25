@@ -1,21 +1,14 @@
 #!/usr/bin/env python
 
-try:
-    import plac
-    from placsupport import argument_error
-    from placsupport.types import *
-except ImportError, e:
-    print "You must install the plac and placsupport modules to use this script."
-    raise e
-
 import os
 import os.path
 from subprocess import call
 import shutil
 from warnings import warn
-
-import os, sys, re, UserDict
-from warnings import warn
+import sys
+import re
+import UserDict
+import argparse
 from itertools import *
 import quodlibet.config
 quodlibet.config.init()
@@ -372,10 +365,15 @@ class TempdirTranscoder(object):
     def __call__(self, tfc):
         return tfc.transcode_to_tempdir(tempdir=self.tempdir, pacpl=self.pacpl, rsync=self.rsync, force=self.force)
 
-# Plac types
 def comma_delimited_set(x):
     # Handles stripping spaces and eliminating zero-length items
     return set(filter(len, list(x.strip() for x in x.split(","))))
+
+def nonneg_int(value):
+    ivalue = int(value)
+    if ivalue < 0:
+         raise argparse.ArgumentTypeError("%r is an invalid negative int value" % value)
+    return ivalue
 
 def directory(x):
     """Resolve symlinks, then return the result if it is a directory.
@@ -387,7 +385,7 @@ def directory(x):
             msg = "Not a directory: %s" % x
         else:
             msg = "Not a directory: %s -> %s" % (x, path)
-        raise TypeError(msg)
+        raise argparse.ArgumentTypeError(msg)
     else:
         return path
 
@@ -397,28 +395,25 @@ def potential_directory(x):
     else:
         return x
 
-# Entry point
-def plac_call_main():
-    return plac.call(main)
+def parse_options():
+    parser = argparse.ArgumentParser(description='Mirror a directory with transcoding.')
+    parser.add_argument('-j', '--jobs', action='store', type=nonneg_int, default=default_job_count(), help="Number of transcoding jobs to run in parallel. Transfers will always run sequentially. The default is the number of cores available on the system. A value of 1 will run transcoding in parallel with copying. Use -j0 to force full sequential operation.")
+    parser.add_argument('-m', '--dry-run', action='store_true', default=False, help="Don't actually modify anything.")
+    parser.add_argument('-f', '--force', action='store_true', help='Update destination files even if they are newer.')
+    parser.add_argument('-i', '--transcode_formats', action='store', type=comma_delimited_set, help="A comma-separated list of input file extensions that must be transcoded.", default='flac,wv,wav,ape,fla')
+    parser.add_argument('-o', '--target-format', action='store', help="All input transcode formats will be transcoded to this output format.")
+    parser.add_argument('-p', '--pacpl-path', action='store', help="The path to the Perl Audio Converter. Only required if PAC is not already in your $PATH or is installed with a non-standard name.")
+    parser.add_argument('-E', '--extra-encoder-options', action='store', help="Extra options to pass to the encoder. This is passed to pacpl using the '--eopts' option. If you think you need to use this, you should probably just edit pacpl's config file instead.")
+    parser.add_argument('-r', '--rsync_path', action='store', help="The path to the rsync binary. Rsync will be used if available, but it is not required.")
+    parser.add_argument('-z', '--include-hidden', action='store', help="Don't skip directories and files starting with a dot.")
+    parser.add_argument('-D', '--delete', action='store_true', help="Delete files in the destination that do not have a corresponding file in the source directory.")
+    parser.add_argument('-t', '--temp-dir', action='store', help="Temporary directory to use for transcoded files.")
+    parser.add_argument('-q', '--quiet', action='store_true', default=False, help="Do not print informational messages.")
+    parser.add_argument('-v', '--verbose', action='store_true', default=False, help="Print debug messages that are probably only useful if something is going wrong.")
+    parser.add_argument('source_directory', type=directory, help="The directory with all your music in it.")
+    parser.add_argument('destination_directory', type=potential_directory, help="The directory where output files will go. The directory hierarchy of the source directory will be replicated here.")
+    return parser.parse_args()
 
-@plac.annotations(
-    # arg=(helptext, kind, abbrev, type, choices, metavar)
-    source_directory=("The directory with all your music in it.", "positional", None, directory),
-    destination_directory=("The directory where output files will go. The directory hierarchy of the source directory will be replicated here.", "positional", None, potential_directory),
-    transcode_formats=("A comma-separated list of input file extensions that must be transcoded.", "option", "i", comma_delimited_set, None, 'flac,wv,wav,ape,fla'),
-    target_format=("All input transcode formats will be transcoded to this output format.", "option", "o", str),
-    pacpl_path=("The path to the Perl Audio Converter. Only required if PAC is not already in your $PATH or is installed with a non-standard name.", "option", "p", str),
-    extra_encoder_options=("Extra options to pass to the encoder. This is passed to pacpl using the '--eopts' option. If you think you need to use this, you should probably just edit pacpl's config file instead.", "option", "E", str, None, "'OPTIONS'"),
-    rsync_path=("The path to the rsync binary. Rsync will be used if available, but it is not required.", "option", "r", str),
-    dry_run=("Don't actually modify anything.", "flag", "m"),
-    include_hidden=("Don't skip directories and files starting with a dot.", "flag", "z"),
-    delete=("Delete files in the destination that do not have a corresponding file in the source directory.", "flag", "D"),
-    force=("Update destination files even if they are newer.", "flag", "f"),
-    temp_dir=("Temporary directory to use for transcoded files.", "option", "t", directory),
-    jobs=("Number of transcoding jobs to run in parallel. Transfers will always run sequentially. The default is the number of cores available on the system. A value of 1 will run transcoding in parallel with copying. Use -j0 to force full sequential operation.", "option", "j", nonneg_int),
-    quiet=("Do not print informational messages.", "flag", "q"),
-    verbose=("Print debug messages that are probably only useful if something is going wrong.", "flag", "v"),
-    )
 def main(source_directory, destination_directory,
          transcode_formats=set(("flac", "wv", "wav", "ape", "fla")),
          target_format="ogg",
@@ -525,6 +520,25 @@ def main(source_directory, destination_directory,
     logging.info("Done.")
     if dry_run:
         logging.info("Ran in --dry_run mode. Nothing actually happened.")
+    return 0
+
+
+    parser.add_argument('-g', '--gain-type', action='store', choices=("album", "track", "auto"), help='Can be "album", "track", or "auto". If "track", only track gain values will be calculated, and album gain values will be erased. if "album", both track and album gain values will be calculated. If "auto", then "album" mode will be used except in directories that contain a file called "TRACKGAIN" or ".TRACKGAIN". In these directories, "track" mode will be used. The default setting is "auto".')
+    parser.add_argument('-i', '--include-hidden', action='store_true', help='Do not skip hidden files and directories.')
+    parser.add_argument('--version', action='store_true', help='display the version number')
+    parser.add_argument('music_paths', metavar='music_path', nargs='+', help="Music files or directories to search for music tracks.")
 
 if __name__ == "__main__":
-    plac_call_main()
+    options = parse_options()
+    res = main(options.source_directory, options.destination_directory,
+         transcode_formats=options.transcode_formats,
+         target_format=options.target_format,
+         pacpl_path=options.pacpl_path,
+         extra_encoder_options=options.extra_encoder_options,
+         rsync_path=options.rsync_path,
+         dry_run=options.dry_run,
+         include_hidden=options.include_hidden,
+         delete=options.delete, force=options.force,
+         quiet=options.quiet, verbose=options.verbose,
+         temp_dir=options.temp_dir, jobs=options.jobs)
+    sys.exit(res)
