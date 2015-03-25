@@ -339,7 +339,6 @@ class DestinationFinder(object):
         """An iterator over all existing files in the destination directory that are not targets of source files.
 
         These are the files that transfercoder would delete if given the --delete option."""
-        target_files = list(self.walk_target_files())
         return sorted(set(self.walk_existing_dest_files()).difference(self.walk_target_files()))
 
     def transfercodes(self, eopts=None):
