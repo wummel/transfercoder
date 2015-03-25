@@ -439,7 +439,8 @@ def main(source_directory, destination_directory,
         logging.basicConfig(level=logging.INFO)
 
     if target_format in transcode_formats:
-        argument_error('The target format must not be one of the transcode formats')
+        logging.error('The target format %s must not be one of the transcode formats', target_format)
+        return 1
 
     if dry_run:
         logging.info("Running in --dry_run mode. Nothing actually happens.")
