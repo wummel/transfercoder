@@ -9,7 +9,7 @@ import sys
 import re
 import UserDict
 import argparse
-from itertools import *
+from itertools import imap
 import quodlibet.config
 quodlibet.config.init()
 from quodlibet.formats import MusicFile
@@ -522,11 +522,6 @@ def main(source_directory, destination_directory,
         logging.info("Ran in --dry_run mode. Nothing actually happened.")
     return 0
 
-
-    parser.add_argument('-g', '--gain-type', action='store', choices=("album", "track", "auto"), help='Can be "album", "track", or "auto". If "track", only track gain values will be calculated, and album gain values will be erased. if "album", both track and album gain values will be calculated. If "auto", then "album" mode will be used except in directories that contain a file called "TRACKGAIN" or ".TRACKGAIN". In these directories, "track" mode will be used. The default setting is "auto".')
-    parser.add_argument('-i', '--include-hidden', action='store_true', help='Do not skip hidden files and directories.')
-    parser.add_argument('--version', action='store_true', help='display the version number')
-    parser.add_argument('music_paths', metavar='music_path', nargs='+', help="Music files or directories to search for music tracks.")
 
 if __name__ == "__main__":
     options = parse_options()
