@@ -15,7 +15,7 @@ quodlibet.config.init()
 from quodlibet.formats import MusicFile
 import multiprocessing
 import logging
-from multiprocessing.pool import ThreadPool
+from multiprocessing import Pool
 from distutils.spawn import find_executable
 
 rsync_exe = find_executable("rsync")
@@ -332,10 +332,10 @@ def comma_delimited_set(x):
     # Handles stripping spaces and eliminating zero-length items
     return set(filter(len, list(x.strip() for x in x.split(","))))
 
-def nonneg_int(value):
+def positive_int(value):
     ivalue = int(value)
-    if ivalue < 0:
-         raise argparse.ArgumentTypeError("%r is an invalid negative int value" % value)
+    if ivalue <= 0:
+         raise argparse.ArgumentTypeError("%r is not a positive int value" % value)
     return ivalue
 
 def directory(x):
@@ -359,7 +359,7 @@ default_transcode_formats = set(("flac", "wv", "wav", "ape", "fla"))
 
 def parse_options():
     parser = argparse.ArgumentParser(description='Mirror a directory with transcoding.')
-    parser.add_argument('-j', '--jobs', action='store', type=nonneg_int, default=default_job_count(), help="Number of transcoding jobs to run in parallel. Transfers will always run sequentially. The default is the number of cores available on the system. A value of 1 will run transcoding in parallel with copying. Use -j0 to force full sequential operation.")
+    parser.add_argument('-j', '--jobs', action='store', type=positive_int, default=default_job_count(), help="Number of transcoding jobs to run in parallel. Transfers will always run sequentially. The default is the number of cores available on the system. A value of 1 will run transcoding in parallel with copying. Use -j0 to force full sequential operation.")
     parser.add_argument('-n', '--dry-run', action='store_true', default=False, help="Don't actually modify anything.")
     parser.add_argument('-f', '--force', action='store_true', help='Update destination files even if they are newer.')
     parser.add_argument('-i', '--transcode_formats', action='store', type=comma_delimited_set, help="A comma-separated list of input file extensions that must be transcoded.", default=','.join(default_transcode_formats))
@@ -391,11 +391,13 @@ def main(source_directory, destination_directory,
     (flac, wavpack, wav, and ape) to ogg, and all other files are
     copied over unmodified."""
     if quiet:
-        logging.basicConfig(level=logging.WARN)
+        level=logging.WARN
     elif verbose:
-        logging.basicConfig(level=logging.DEBUG)
+        level=logging.DEBUG
     else:
-        logging.basicConfig(level=logging.INFO)
+        level=logging.INFO
+    format = "%(asctime)s %(levelname)s %(message)s"
+    logging.basicConfig(level=level, format=format)
 
     if target_format in transcode_formats:
         logging.error('The target format %s must not be one of the transcode formats', target_format)
@@ -403,19 +405,13 @@ def main(source_directory, destination_directory,
 
     if dry_run:
         logging.info("Running in --dry_run mode. Nothing actually happens.")
-        # No point doing nothing in parallel
-        if jobs > 0:
-            logging.debug("Switching to sequential mode because --dry_run was specified.")
-            jobs = 0
 
     source_directory = os.path.realpath(source_directory)
     destination_directory = os.path.realpath(destination_directory)
     df = DestinationFinder(source_directory, destination_directory,
                            transcode_formats, target_format, include_hidden)
-    # get transfercode objects - one per file
+    logging.info("Getting transfer objects for each file from %s", source_directory)
     transfercodes = df.transfercodes(eopts=extra_encoder_options)
-    # Sort jobs that don't need transcoding first
-    transfercodes = sorted(transfercodes, key=Transfercode.needs_transcode)
 
     def start_transfer(tfc):
         """Helper function to start a transfer."""
@@ -425,29 +421,23 @@ def main(source_directory, destination_directory,
     if not dry_run:
         create_dirs(set(x.dest_dir for x in transfercodes))
 
-    if jobs == 0:
-        logging.debug("Running in sequential mode.")
-        for tfc in transfercodes:
-            start_transfer(tfc)
-    else:
-        assert not dry_run, "Parallel dry run makes no sense"
-        logging.debug("Running %s transcoding %s and 1 transfer job in parallel.", jobs, ("jobs" if jobs > 1 else "job"))
-        transcode_pool = ThreadPool(jobs)
-        try:
-            transcode_pool.imap(start_transfer, transfercodes)
-            transcode_pool.close()
-            transcode_pool.join()
-        except KeyboardInterrupt:
-            logging.warn("Stopping transcode processes....")
-            transcode_pool.terminate()
-            logging.warn("... stopped.")
+    logging.info("Running %s %s in parallel to transcode and transfer files", jobs, ("jobs" if jobs > 1 else "job"))
+    transcode_pool = Pool(jobs)
+    try:
+        transcode_pool.imap_unordered(start_transfer, transfercodes)
+        transcode_pool.close()
+        transcode_pool.join()
+    except KeyboardInterrupt:
+        logging.warning("Stopping jobs....")
+        transcode_pool.terminate()
+        logging.warning("... stopped")
     if delete:
         for f in df.walk_extra_dest_files():
             logging.info("Deleting: %s", f)
             if not dry_run:
                 os.remove(f)
 
-    logging.info("Done.")
+    logging.info("Done")
     if dry_run:
         logging.info("Ran in --dry_run mode. Nothing actually happened.")
     return errors
