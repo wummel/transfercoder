@@ -444,7 +444,7 @@ def main(source_directory, destination_directory,
     logging.info("Done with %d %s", errors, ("error" if errors == 1 else "errors"))
     if dry_run:
         logging.info("Ran in --dry_run mode. Nothing actually happened.")
-    return errors
+    return 1 if errors > 0 else 0
 
 
 if __name__ == "__main__":
