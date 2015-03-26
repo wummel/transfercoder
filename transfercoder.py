@@ -220,22 +220,24 @@ class Transfercode(object):
 
     def transfer(self, force=False, dry_run=False):
         """Copies or transcodes src to dest.
-
-    Destination directory must already exist.
-
-    Optional arg force performs the transfer even if dest is newer.
-
-    Optional arg dry_run skips the actual action."""
-
+        Destination directory must already exist.
+        Optional arg force performs the transfer even if dest is newer.
+        Optional arg dry_run skips the actual action."""
+        error = 0
         if force or self.needs_update():
-            if not dry_run:
-                self.check()
-            if self.needs_transcode():
-                self.transcode(dry_run=dry_run)
-            else:
-                self.copy(dry_run=dry_run)
+            try:
+                if not dry_run:
+                    self.check()
+                if self.needs_transcode():
+                    self.transcode(dry_run=dry_run)
+                else:
+                    self.copy(dry_run=dry_run)
+            except:
+                logging.exception("Error transfering %s -> %s", self.src, self.dest)
+                error = 1
         else:
             logging.debug("Skipping: %s -> %s", self.src, self.dest)
+        return error
 
 def is_subpath(path, parent):
     """Returns true if path is a subpath of parent.
@@ -313,7 +315,7 @@ class DestinationFinder(object):
         """An iterator over all existing files in the destination directory that are not targets of source files.
 
         These are the files that transfercoder would delete if given the --delete option."""
-        return sorted(set(self.walk_existing_dest_files()).difference(self.walk_target_files()))
+        return set(self.walk_existing_dest_files()).difference(self.walk_target_files())
 
     def transfercodes(self, eopts=None):
         """Generate Transfercode objects for all src files.
@@ -415,7 +417,7 @@ def main(source_directory, destination_directory,
 
     def start_transfer(tfc):
         """Helper function to start a transfer."""
-        tfc.transfer(force=force, dry_run=dry_run)
+        return tfc.transfer(force=force, dry_run=dry_run)
 
     errors = 0
     if not dry_run:
@@ -424,9 +426,11 @@ def main(source_directory, destination_directory,
     logging.info("Running %s %s in parallel to transcode and transfer files", jobs, ("jobs" if jobs > 1 else "job"))
     transcode_pool = Pool(jobs)
     try:
-        transcode_pool.imap_unordered(start_transfer, transfercodes)
+        results = transcode_pool.imap_unordered(start_transfer, transfercodes)
         transcode_pool.close()
         transcode_pool.join()
+        for result in results:
+            errors += result
     except KeyboardInterrupt:
         logging.warning("Stopping jobs....")
         transcode_pool.terminate()
@@ -437,7 +441,7 @@ def main(source_directory, destination_directory,
             if not dry_run:
                 os.remove(f)
 
-    logging.info("Done")
+    logging.info("Done with %d %s", errors, ("error" if errors == 1 else "errors"))
     if dry_run:
         logging.info("Ran in --dry_run mode. Nothing actually happened.")
     return errors
