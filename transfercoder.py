@@ -318,10 +318,8 @@ class DestinationFinder(object):
         return set(self.walk_existing_dest_files()).difference(self.walk_target_files())
 
     def transfercodes(self, eopts=None):
-        """Generate Transfercode objects for all src files.
-
-        Optional arg 'eopts' is passed to the Transfercode() constructor."""
-        return (Transfercode(src,dest) for src, dest in self.walk_source_target_pairs())
+        """Generate Transfercode objects for all src files as a list."""
+        return list(Transfercode(src,dest) for src, dest in self.walk_source_target_pairs())
 
 def create_dirs(dirs):
     """Ensure that a list of directories all exist"""
@@ -375,6 +373,18 @@ def parse_options():
     parser.add_argument('destination_directory', type=potential_directory, help="The directory where output files will go. The directory hierarchy of the source directory will be replicated here.")
     return parser.parse_args()
 
+GLOBAL_FORCE=False
+GLOBAL_DRY_RUN=False
+def init_transfer(force, dry_run):
+    """Helper function to initialize the per-process Pool options."""
+    global GLOBAL_FORCE, GLOBAL_DRY_RUN
+    GLOBAL_FORCE=force
+    GLOBAL_DRY_RUN=dry_run
+
+def start_transfer(tfc):
+    """Helper function to start a transfer."""
+    return tfc.transfer(force=GLOBAL_FORCE, dry_run=GLOBAL_DRY_RUN)
+
 def main(source_directory, destination_directory,
          transcode_formats=default_transcode_formats,
          target_format="ogg",
@@ -400,6 +410,14 @@ def main(source_directory, destination_directory,
         level=logging.INFO
     format = "%(asctime)s %(levelname)s %(message)s"
     logging.basicConfig(level=level, format=format)
+    logging.debug("source_directory=%s", source_directory)
+    logging.debug("destination_directory=%s", destination_directory)
+    logging.debug("transcode_formats=%s, target_format=%s, extra_encoder_options=%s",
+        transcode_formats, target_format, extra_encoder_options)
+    logging.debug("dry_run=%s, include_hidden=%s, delete=%s, force=%s",
+        dry_run, include_hidden, delete, force)
+    logging.debug("quiet=%s, verbose=%s, jobs=%s",
+        quiet, verbose, jobs)
 
     if target_format in transcode_formats:
         logging.error('The target format %s must not be one of the transcode formats', target_format)
@@ -415,16 +433,12 @@ def main(source_directory, destination_directory,
     logging.info("Getting transfer objects for each file from %s", source_directory)
     transfercodes = df.transfercodes(eopts=extra_encoder_options)
 
-    def start_transfer(tfc):
-        """Helper function to start a transfer."""
-        return tfc.transfer(force=force, dry_run=dry_run)
-
     errors = 0
     if not dry_run:
         create_dirs(set(x.dest_dir for x in transfercodes))
 
     logging.info("Running %s %s in parallel to transcode and transfer files", jobs, ("jobs" if jobs > 1 else "job"))
-    transcode_pool = Pool(jobs)
+    transcode_pool = Pool(jobs, init_transfer, (force, dry_run))
     try:
         results = transcode_pool.imap_unordered(start_transfer, transfercodes)
         transcode_pool.close()
