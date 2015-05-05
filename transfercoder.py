@@ -34,18 +34,6 @@ def call_silent(cmd, *args, **kwargs):
     logging.debug("Calling command: %s", repr(cmd))
     return call(cmd, *args, stdin=nullsrc, stdout=nullsink, stderr=nullsink, **kwargs)
 
-def test_executable(exe, options=("--help",)):
-    """Test whether exe can be executed by doing `exe --help` or similar.
-
-    Returns True if the command succeeds, false otherwise. The exe's
-    stdin, stdout, and stderr are all redirected from/to the null
-    device."""
-    cmd = (exe, ) + options
-    try:
-        return call_silent(cmd) == 0
-    except:
-        return False
-
 def filter_hidden(paths):
     return filter(lambda x: x[0] != ".", paths)
 
@@ -373,6 +361,7 @@ def parse_options():
     parser.add_argument('destination_directory', type=potential_directory, help="The directory where output files will go. The directory hierarchy of the source directory will be replicated here.")
     return parser.parse_args()
 
+
 GLOBAL_FORCE=False
 GLOBAL_DRY_RUN=False
 def init_transfer(force, dry_run):
@@ -432,19 +421,22 @@ def main(source_directory, destination_directory,
                            transcode_formats, target_format, include_hidden)
     logging.info("Getting transfer objects for each file from %s", source_directory)
     transfercodes = df.transfercodes(eopts=extra_encoder_options)
+    num_tasks = len(transfercodes)
 
     errors = 0
     if not dry_run:
         create_dirs(set(x.dest_dir for x in transfercodes))
 
-    logging.info("Running %s %s in parallel to transcode and transfer files", jobs, ("jobs" if jobs > 1 else "job"))
+    logging.info("Running %d %s in parallel to transcode and transfer %d files",
+        jobs, ("jobs" if jobs > 1 else "job"), num_tasks)
     transcode_pool = Pool(jobs, init_transfer, (force, dry_run))
     try:
         results = transcode_pool.imap_unordered(start_transfer, transfercodes)
         transcode_pool.close()
         transcode_pool.join()
-        for result in results:
+        for i, result in enumerate(results, start=1):
             errors += result
+            logging.debug('done {0:%}'.format(i/num_tasks))
     except KeyboardInterrupt:
         logging.warning("Stopping jobs....")
         transcode_pool.terminate()
