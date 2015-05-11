@@ -2,7 +2,7 @@
 
 import os
 import os.path
-from subprocess import call
+import subprocess
 import shutil
 from warnings import warn
 import sys
@@ -24,15 +24,16 @@ pacpl_exe = find_executable("pacpl")
 def default_job_count():
     try:
         return multiprocessing.cpu_count()
-    except:
+    except Exception:
         return 1
 
-def call_silent(cmd, *args, **kwargs):
-    """Like subprocess.call, but redirects stdin/out/err to null device."""
+def call_checked(cmd, *args, **kwargs):
+    """Run subprocess.check_output to get output in case of errors.
+    Stdin is read from the null device.
+    Raises subprocess.CalledProcessError on errors."""
     nullsrc = open(os.devnull, "r")
-    nullsink = open(os.devnull, "w")
     logging.debug("Calling command: %s", repr(cmd))
-    return call(cmd, *args, stdin=nullsrc, stdout=nullsink, stderr=nullsink, **kwargs)
+    return subprocess.check_output(cmd, *args, stdin=nullsrc, stderr=subprocess.STDOUT, **kwargs)
 
 def filter_hidden(paths):
     return filter(lambda x: x[0] != ".", paths)
@@ -68,19 +69,19 @@ class AudioFile(UserDict.DictMixin):
         if self.blacklisted(item):
             warn("%s is a blacklisted key." % item)
         else:
-            return self.data.__getitem__(item)
+            return self.data[item]
 
     def __setitem__(self, item, value):
         if self.blacklisted(item):
             warn("%s is a blacklisted key." % item)
         else:
-            return self.data.__setitem__(item, value)
+           self.data[item] = value
 
     def __delitem__(self, item):
         if self.blacklisted(item):
             warn("%s is a blacklisted key." % item)
         else:
-            return self.data.__delitem__(item)
+            del self.data[item]
 
     def blacklisted(self, item):
         """Return True if tag is blacklisted.
@@ -112,11 +113,15 @@ def copy_tags (src, dest):
 
 Excludes format-specific tags and replaygain info, which does not
 carry across formats."""
-    m_src = AudioFile(src, blacklist = blacklist_regexes)
-    m_dest = AudioFile(dest, blacklist = m_src.blacklist)
-    m_dest.clear()
-    m_dest.update(m_src)
-    m_dest.write()
+    try:
+        m_src = AudioFile(src, blacklist = blacklist_regexes)
+        m_dest = AudioFile(dest, blacklist = m_src.blacklist)
+        m_dest.clear()
+        m_dest.update(m_src)
+        m_dest.write()
+    except ValueError:
+        # It's ok if copying the tags fails, but print a warning.
+        logging.warn("Could not copy tags from %s -> %s", src, dest, exc_info=sys.exc_info())
 
 def copy_mode(src, dest):
     """Copy file mode. Is allowed to fail since some network filesystems
@@ -124,8 +129,8 @@ def copy_mode(src, dest):
     try:
         shutil.copymode(src, dest)
     except OSError:
-        # It's ok if setting the mode fails
-        pass
+        # It's ok if setting the mode fails, but print a warning.
+        logging.warn("Could not copy file mode from %s -> %s", src, dest, exc_info=sys.exc_info())
 
 class Transfercode(object):
     def __init__(self, src, dest, eopts=None):
@@ -165,9 +170,9 @@ class Transfercode(object):
         rel_dest = os.path.relpath(self.dest, self.src_dir)
         rel_dest_base = os.path.splitext(rel_dest)[0]
         command = [pacpl_exe] + (["--eopts", self.eopts] if self.eopts else []) + \
-          ["--overwrite", "--keep", "--to", self.dest_ext, "--outfile", rel_dest_base, self.src]
-        if call_silent(command) != 0:
-            raise Exception("Perl Audio Converter failed")
+          ["--bitrate=160", "--overwrite", "--keep", "--to", self.dest_ext,
+           "--outfile", rel_dest_base, self.src]
+        call_checked(command)
         if not os.path.isfile(self.dest):
             raise Exception("Perl Audio Converter did not produce an output file")
         copy_tags(self.src, self.dest)
@@ -187,8 +192,8 @@ class Transfercode(object):
             pass
         if not success and rsync_exe:
             try:
-                retval = call_silent([rsync_exe, "-q", "-p", self.src, self.dest])
-                success = (retval == 0)
+                call_checked([rsync_exe, "-q", "-p", self.src, self.dest])
+                success = True
             except:
                 success = False
         if not success:

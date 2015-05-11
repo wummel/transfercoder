@@ -67,7 +67,7 @@ transfer.
   different formats of the same song need different adjustments, even
   though in theory they should have identical volumes. So replaygain
   your library on your device after syncing. If only there was a
-  [tool](https://github.com/DarwinAwardWinner/rganalysis) for that
+  [tool](https://github.com/wummel/rganalysis) for that
   too.
 
 # Why
