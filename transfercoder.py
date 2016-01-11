@@ -167,6 +167,12 @@ class Transfercode(object):
 
     def transcode(self, dry_run=False):
         logging.info("Transcoding: %s -> %s", self.src, self.dest)
+        if '"' in self.src:
+            # pacpl's quoting does not support double quotes in the filename
+            # since it just surrounds the filename with double quotes itself.
+            raise Exception("Double quote in %r is not supported by pacpl. "
+                            "Rename the file and remove the double quote."
+                            % self.src)
         if dry_run:
             return
         # pacpl expects a relative path with no extension, apparently
