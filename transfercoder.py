@@ -122,7 +122,7 @@ carry across formats."""
         m_dest.clear()
         m_dest.update(m_src)
         m_dest.write()
-    except ValueError:
+    except Exception:
         # It's ok if copying the tags fails, but print a warning.
         logging.warn("Could not copy tags from %s -> %s", src, dest, exc_info=sys.exc_info())
 
