@@ -203,7 +203,7 @@ class Transfercode(object):
             try:
                 call_checked([rsync_exe, "-q", "-p", self.src, self.dest])
                 success = True
-            except:
+            except Exception:
                 success = False
         if not success:
             # Try regular copy instead if rsync is not available or failed
@@ -234,7 +234,7 @@ class Transfercode(object):
                     self.transcode(dry_run=dry_run)
                 else:
                     self.copy(dry_run=dry_run)
-            except:
+            except Exception:
                 logging.exception("Error transfering %s -> %s", self.src, self.dest)
                 error = 1
         else:
