@@ -7,7 +7,7 @@ import shutil
 from warnings import warn
 import sys
 import re
-import UserDict
+import collections
 import argparse
 from itertools import imap
 import quodlibet.config
@@ -46,7 +46,7 @@ def splitext_afterdot(path):
         ext = ext[1:]
     return (base, ext)
 
-class AudioFile(UserDict.DictMixin):
+class AudioFile(collections.MutableMapping):
     """A simple class just for tag editing.
 
     No internal mutagen tags are exposed, or filenames or anything. So
@@ -83,6 +83,12 @@ class AudioFile(UserDict.DictMixin):
         else:
             del self.data[item]
 
+    def __iter__(self):
+        return ( key for key in self.data if not self.blacklisted(key) )
+
+    def __len__(self):
+        return len([key for key in self.data if not self.blacklisted(key)])
+
     def blacklisted(self, item):
         """Return True if tag is blacklisted.
 
@@ -93,9 +99,6 @@ class AudioFile(UserDict.DictMixin):
                 return True
         else:
             return False
-
-    def keys(self):
-        return [ key for key in self.data.keys() if not self.blacklisted(key) ]
 
     def write(self):
         return self.data.write()
