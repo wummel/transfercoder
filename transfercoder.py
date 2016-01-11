@@ -10,8 +10,8 @@ import re
 import collections
 import argparse
 from itertools import imap
-import quodlibet.config
-quodlibet.config.init()
+import quodlibet
+quodlibet.init_cli()
 from quodlibet.formats import MusicFile
 import multiprocessing
 import logging
