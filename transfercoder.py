@@ -15,8 +15,13 @@ quodlibet.init_cli()
 from quodlibet.formats import MusicFile
 import multiprocessing
 import logging
-from multiprocessing import Pool
 from distutils.spawn import find_executable
+# Use the built-in version of scandir/walk if possible, otherwise
+# use the scandir module version
+try:
+    from os import scandir, walk
+except ImportError:
+    from scandir import scandir, walk
 
 rsync_exe = find_executable("rsync")
 pacpl_exe = find_executable("pacpl")
@@ -53,17 +58,23 @@ class AudioFile(collections.MutableMapping):
     calling clear() won't destroy the filename field or things like
     that. Use it like a dict, then .write() it to commit the changes.
 
-    Optional argument blacklist is a list of regexps matching
-    non-transferrable tags. They will effectively be hidden, nether
-    settable nor gettable.
-
     Or grab the actual underlying quodlibet format object from the
     .data field and get your hands dirty."""
 
-    def __init__(self, filename, blacklist=()):
+    # A list of regexps matching non-transferrable tags, like file format
+    # info and replaygain info. This will not be transferred from source,
+    # nor deleted from destination. They will effectively be hidden, nether
+    # settable nor gettable.
+    blacklist_regexes = [re.compile(s) for s in (
+        'encoded',
+        'replaygain',
+        # Exclude mutagen's internal tags
+        '^~',
+        )
+    ]
+
+    def __init__(self, filename):
         self.data = MusicFile(filename)
-        # Also exclude mutagen's internal tags
-        self.blacklist = [ re.compile("^~") ] + blacklist
 
     def __getitem__(self, item):
         if self.blacklisted(item):
@@ -84,7 +95,7 @@ class AudioFile(collections.MutableMapping):
             del self.data[item]
 
     def __iter__(self):
-        return ( key for key in self.data if not self.blacklisted(key) )
+        return (key for key in self.data if not self.blacklisted(key))
 
     def __len__(self):
         return len([key for key in self.data if not self.blacklisted(key)])
@@ -94,22 +105,11 @@ class AudioFile(collections.MutableMapping):
 
         Blacklist automatically includes internal mutagen tags (those
         beginning with a tilde)."""
-        for regex in self.blacklist:
-            if re.search(regex, item):
-                return True
-        else:
-            return False
+        return any(re.search(regex, item) for regex in self.blacklist_regexes)
 
     def write(self):
         return self.data.write()
 
-# A list of regexps matching non-transferrable tags, like file format
-# info and replaygain info. This will not be transferred from source,
-# nor deleted from destination.
-blacklist_regexes = [ re.compile(s) for s in (
-        'encoded',
-        'replaygain',
-        ) ]
 
 def copy_tags (src, dest):
     """Replace tags of dest file with those of src.
@@ -117,8 +117,8 @@ def copy_tags (src, dest):
 Excludes format-specific tags and replaygain info, which does not
 carry across formats."""
     try:
-        m_src = AudioFile(src, blacklist = blacklist_regexes)
-        m_dest = AudioFile(dest, blacklist = m_src.blacklist)
+        m_src = AudioFile(src)
+        m_dest = AudioFile(dest)
         m_dest.clear()
         m_dest.update(m_src)
         m_dest.write()
@@ -260,7 +260,7 @@ def walk_files(dir, hidden=False):
 
     If hidden=True, include hidden files and files inside hidden
     directories."""
-    for root, dirs, files in os.walk(dir):
+    for root, dirs, files in walk(dir):
         if not hidden:
             dirs = filter_hidden(dirs)
             files = filter_hidden(files)
@@ -443,8 +443,10 @@ def main(source_directory, destination_directory,
 
     logging.info("Running %d %s in parallel to transcode and transfer %d files",
         jobs, ("jobs" if jobs > 1 else "job"), num_tasks)
-    transcode_pool = Pool(jobs, init_transfer, (force, dry_run))
+    # start jobs as separate processses
+    transcode_pool = multiprocessing.Pool(jobs, init_transfer, (force, dry_run))
     try:
+        # the order of transferred files is not important, so use imap_unordered
         results = transcode_pool.imap_unordered(start_transfer, transfercodes)
         transcode_pool.close()
         transcode_pool.join()
@@ -456,6 +458,7 @@ def main(source_directory, destination_directory,
         transcode_pool.terminate()
         logging.warning("... stopped")
     if delete:
+        # Remove files that are in destination folders but not in the source
         for f in df.walk_extra_dest_files():
             logging.info("Deleting: %s", f)
             if not dry_run:
