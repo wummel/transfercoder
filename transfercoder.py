@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import os
 import os.path
@@ -9,7 +9,6 @@ import sys
 import re
 import collections
 import argparse
-from itertools import imap
 import quodlibet
 quodlibet.init_cli()
 from quodlibet.formats import MusicFile
@@ -41,7 +40,7 @@ def call_checked(cmd, *args, **kwargs):
     return subprocess.check_output(cmd, *args, stdin=nullsrc, stderr=subprocess.STDOUT, **kwargs)
 
 def filter_hidden(paths):
-    return filter(lambda x: x[0] != ".", paths)
+    return [x for x in paths if x and x[0] != "."]
 
 def splitext_afterdot(path):
     """Same as os.path.splitext, but the dot goes to the base."""
@@ -301,7 +300,7 @@ class DestinationFinder(object):
 
     def walk_target_files(self):
         """An iterator over all files that are to be created in the destination directory."""
-        return imap(self.find_dest, self.walk_source_files())
+        return map(self.find_dest, self.walk_source_files())
 
     def walk_source_target_pairs(self):
         """iter(zip(self.walk_source_files(), self.walk_target_files()))'.
@@ -330,9 +329,10 @@ def create_dirs(dirs):
             logging.debug("Creating directory: %s", d)
             os.makedirs(d)
 
-def comma_delimited_set(x):
+def comma_delimited_set(alist):
     # Handles stripping spaces and eliminating zero-length items
-    return set(filter(len, list(x.strip() for x in x.split(","))))
+    items = [x.strip() for x in alist.split(",")]
+    return set([x for x in items if x])
 
 def positive_int(value):
     ivalue = int(value)
@@ -384,9 +384,23 @@ def init_transfer(force, dry_run):
     GLOBAL_FORCE=force
     GLOBAL_DRY_RUN=dry_run
 
+
 def start_transfer(tfc):
     """Helper function to start a transfer."""
     return tfc.transfer(force=GLOBAL_FORCE, dry_run=GLOBAL_DRY_RUN)
+
+
+def configure_logging(quiet, verbose):
+    """Set log format with logging.basicConfig()"""
+    if quiet:
+        level=logging.WARN
+    elif verbose:
+        level=logging.DEBUG
+    else:
+        level=logging.INFO
+    format = "%(asctime)s %(levelname)s %(message)s"
+    logging.basicConfig(level=level, format=format)
+
 
 def main(source_directory, destination_directory,
          transcode_formats=default_transcode_formats,
@@ -405,14 +419,7 @@ def main(source_directory, destination_directory,
     The default behavior is to transcode several lossless formats
     (flac, wavpack, wav, and ape) to ogg, and all other files are
     copied over unmodified."""
-    if quiet:
-        level=logging.WARN
-    elif verbose:
-        level=logging.DEBUG
-    else:
-        level=logging.INFO
-    format = "%(asctime)s %(levelname)s %(message)s"
-    logging.basicConfig(level=level, format=format)
+    configure_logging(quiet, verbose)
     logging.debug("source_directory=%s", source_directory)
     logging.debug("destination_directory=%s", destination_directory)
     logging.debug("transcode_formats=%s, target_format=%s, extra_encoder_options=%s",
