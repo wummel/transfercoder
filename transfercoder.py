@@ -187,12 +187,18 @@ class Transfercode(object):
         copy_mode(self.src, self.dest)
 
     def copy(self, dry_run=False):
-        """Copy src to dest, trying rsync first, then normal file copy."""
+        """Copy src to dest, trying hard linking and rsync first,
+        then normal file copy."""
         logging.info("Copying: %s -> %s", self.src, self.dest)
         if dry_run:
             return
         success = False
-        if rsync_exe:
+        try:
+            os.link(self.src, self.dest)
+            success = True
+        except OSError:
+            pass
+        if not success and rsync_exe:
             try:
                 call_checked([rsync_exe, "-q", "-p", self.src, self.dest])
                 success = True
